@@ -6,15 +6,15 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
-	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing/pubsub"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func main() {
 	fmt.Println("Starting Peril server...")
-	const connString = "amqp://guest:guest@localhost:5672/"
-	conn, err := amqp.Dial(connString)
+	const url = "amqp://guest:guest@localhost:5672/"
+	conn, err := amqp.Dial(url)
 	if err != nil {
 		log.Fatalf("Error occured while connecting to RabbitMQ: %v\n", err)
 	}
@@ -36,6 +36,7 @@ func main() {
 		log.Fatalf("Error while publishing msg: %v", err)
 	}
 
+	// make interactive
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
 	<-signalChan
