@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
-	"os/signal"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
@@ -15,26 +13,36 @@ import (
 func main() {
 	const url = "amqp://guest:guest@localhost:5672/"
 	fmt.Println("Starting Peril client...")
-	amqpConn, err := amqp.Dial(url)
+
+	conn, err := amqp.Dial(url)
 	if err != nil {
 		log.Fatalf("Error connecting to RabbitMQ: %v\n", err)
 	}
-	defer amqpConn.Close()
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Fatalf("Error creating channel: %v\n", err)
+	}
+	defer ch.Close()
 
 	username, err := gamelogic.ClientWelcome()
 	if err != nil {
 		log.Fatalf("Error getting username: %v\n", err)
 	}
 
-	queueName := fmt.Sprintf("pause.%v", username)
-	_, _, err = pubsub.DeclareAndBind(amqpConn, routing.ExchangePerilDirect, routing.PauseKey, queueName, pubsub.Transient)
+	pauseQName := fmt.Sprintf("pause.%v", username)
+	gameState := gamelogic.NewGameState(username)
+	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilDirect, pauseQName, routing.PauseKey, pubsub.Transient, handlerPause(gameState))
 	if err != nil {
-		log.Fatalf("Error binding queue: %v\n", err)
+		log.Fatalf("Error subscribing to %v: %v\n", pauseQName, err)
 	}
 
-	// make interactive
-	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, os.Interrupt)
-	<-signalCh
-	fmt.Printf("Exiting game...\n")
+	moveQName := fmt.Sprintf("army_moves.%v", username)
+	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilTopic, moveQName, "army_moves.*", pubsub.Transient, handlerMove(gameState, ch))
+	if err != nil {
+		log.Fatalf("Error subscribing to %v: %v\n", moveQName, err)
+	}
+
+	startREPL(gameState, ch)
 }

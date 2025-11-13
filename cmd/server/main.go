@@ -3,9 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
-	"os/signal"
 
+	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -27,18 +26,13 @@ func main() {
 		log.Fatalf("Error creating channel: %v", err)
 	}
 
-	playingState := routing.PlayingState{
-		IsPaused: true,
-	}
-
-	err = pubsub.PublishJson(amqpCh, routing.ExchangePerilDirect, routing.PauseKey, playingState)
+	topicKey := "game_logs.*"
+	_, _, err = pubsub.DeclareAndBind(conn, routing.ExchangePerilTopic, topicKey, routing.GameLogSlug, pubsub.Durable)
 	if err != nil {
-		log.Fatalf("Error while publishing msg: %v", err)
+		log.Fatalf("Error while binding server to queue: %v\n", err)
 	}
 
-	// make interactive
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt)
-	<-signalChan
-	defer fmt.Printf("\nRabbitMQ connection closed\n")
+	gamelogic.PrintServerHelp()
+
+	handleCmds(amqpCh)
 }
