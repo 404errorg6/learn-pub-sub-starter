@@ -12,7 +12,12 @@ import (
 func handlerWar(gs *gamelogic.GameState, ch *amqp091.Channel) func(gamelogic.RecognitionOfWar) pubsub.AckType {
 	defer fmt.Printf("> ")
 	return func(row gamelogic.RecognitionOfWar) pubsub.AckType {
-		outcome, _, _ := gs.HandleWar(row)
+
+		var msg string
+		key := fmt.Sprintf("%v.%v", routing.GameLogSlug, row.Attacker.Username)
+		gl := routing.GameLog{}
+		outcome, winner, loser := gs.HandleWar(row)
+
 		switch outcome {
 		case gamelogic.WarOutcomeNotInvolved:
 			return pubsub.NackRequeue
@@ -22,10 +27,27 @@ func handlerWar(gs *gamelogic.GameState, ch *amqp091.Channel) func(gamelogic.Rec
 
 		case gamelogic.WarOutcomeOpponentWon:
 		case gamelogic.WarOutcomeYouWon:
-		case gamelogic.WarOutcomeDraw:
+			msg = fmt.Sprintf("%v won a war against %v\n", winner, loser)
+			gl.Message = msg
+
+			err := pubsub.PublishGob(ch, routing.ExchangePerilTopic, key, gl)
+			if err != nil {
+				return pubsub.NackRequeue
+			}
 			return pubsub.Ack
+
+		case gamelogic.WarOutcomeDraw:
+			msg = fmt.Sprintf("A between %v and %v resulted in a draw\n", winner, loser)
+			gl.Message = msg
+
+			err := pubsub.PublishGob(ch, routing.ExchangePerilTopic, key, gl)
+			if err != nil {
+				return pubsub.NackRequeue
+			}
+			return pubsub.Ack
+
 		default:
-			fmt.Printf("Invalid outcome: %v\n", outcome)
+			msg = fmt.Sprintf("Invalid outcome: %v\n", outcome)
 		}
 		return pubsub.Ack
 	}

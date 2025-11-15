@@ -1,9 +1,10 @@
 package pubsub
 
 import (
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -23,6 +24,28 @@ const (
 	NackDiscard
 )
 
+func SubscribeGob[T any](conn *amqp.Connection, exchange, queueName, key string, queueType SimpleQueueType, handler func(T) AckType) error {
+	err := subscribe(
+		conn,
+		exchange,
+		queueName,
+		key,
+		queueType,
+		handler,
+		func(body []byte) (T, error) {
+			var converted T
+			buffer := bytes.NewReader(body)
+			decoder := gob.NewDecoder(buffer)
+
+			err := decoder.Decode(&converted)
+			if err != nil {
+				return converted, err
+			}
+			return converted, nil
+		})
+	return err
+}
+
 func SubscribeJSON[T any](
 	conn *amqp.Connection,
 	exchange,
@@ -31,7 +54,40 @@ func SubscribeJSON[T any](
 	queueType SimpleQueueType,
 	handler func(T) AckType,
 ) error {
-	ch, _, err := DeclareAndBind(conn, exchange, key, queueName, queueType)
+	err := subscribe(
+		conn,
+		exchange,
+		queueName,
+		key,
+		queueType,
+		handler,
+		func(body []byte) (T, error) {
+			var val T
+			err := json.Unmarshal(body, &val)
+
+			if err != nil {
+				return val, err
+			}
+			return val, nil
+		})
+	return err
+}
+
+func subscribe[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	queueType SimpleQueueType,
+	handler func(T) AckType,
+	unmarshaller func([]byte) (T, error),
+) error {
+	ch, _, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
+	if err != nil {
+		return err
+	}
+
+	err = ch.Qos(10, 0, false)
 	if err != nil {
 		return err
 	}
@@ -41,78 +97,79 @@ func SubscribeJSON[T any](
 		return err
 	}
 
-	var value T
-
-	go func(value *T) {
+	go func() {
 		for msg := range deliveryCh {
-			err := json.Unmarshal(msg.Body, value)
+			val, err := unmarshaller(msg.Body)
 			if err != nil {
-				log.Printf("Error unmarshalling data: %v\n", err)
+				fmt.Printf("Error occured while unmarshalling msg: %v\n", err)
+				continue
 			}
 
-			ack := handler(*value)
-			switch ack {
+			ackType := handler(val)
+			switch ackType {
 			case Ack:
 				err = msg.Ack(false)
 				if err != nil {
-					log.Printf("Error acknowledging msg: %v\n", err)
+					fmt.Printf("Error acknowledging msg: %v\n", err)
+					continue
 				}
 				fmt.Printf("(Ack used)\n")
 
 			case NackRequeue:
 				err = msg.Nack(false, true)
 				if err != nil {
-					log.Printf("Error NackRequeue-ing msg: %v\n", err)
+					fmt.Printf("Error NackRequeue-ing msg: %v\n", err)
 				}
 				fmt.Printf("(NackRequeue used)\n")
 
 			case NackDiscard:
 				err = msg.Nack(false, false)
 				if err != nil {
-					log.Printf("Error NackDiscard-ing msg: %v\n", err)
+					fmt.Printf("Error NackDiscard-ing msg: %v\n", err)
 				}
 				fmt.Printf("(NackDiscard used)\n")
 			}
 			fmt.Printf("> ")
 		}
-	}(&value)
-
-	return err
+	}()
+	return nil
 }
 
 func DeclareAndBind(
 	conn *amqp.Connection,
 	exchange,
-	key,
-	queueName string,
+	queueName,
+	key string,
 	queueType SimpleQueueType,
 ) (*amqp.Channel, amqp.Queue, error) {
-	var queue amqp.Queue
 	ch, err := conn.Channel()
 	if err != nil {
-		return ch, queue, err
+		return nil, amqp.Queue{}, fmt.Errorf("could not create channel: %v", err)
 	}
 
-	var durable, autoDel, exclusive bool
-	switch queueType {
-	case Durable:
-		durable = true
-
-	case Transient:
-		autoDel = true
-		exclusive = true
-	}
-
-	args := make(amqp.Table)
-	args["x-dead-letter-exchange"] = "peril_dlx"
-	queue, err = ch.QueueDeclare(queueName, durable, autoDel, exclusive, false, args)
+	queue, err := ch.QueueDeclare(
+		queueName,            // name
+		queueType == Durable, // durable
+		queueType != Durable, // delete when unused
+		queueType != Durable, // exclusive
+		false,                // no-wait
+		amqp.Table{
+			"x-dead-letter-exchange": "peril_dlx",
+		},
+	)
 	if err != nil {
-		return ch, queue, err
+		return nil, amqp.Queue{}, fmt.Errorf("could not declare queue: %v", err)
 	}
 
-	err = ch.QueueBind(queueName, key, exchange, false, nil)
+	err = ch.QueueBind(
+		queue.Name, // queue name
+		key,        // routing key
+		exchange,   // exchange
+		false,      // no-wait
+		nil,        // args
+	)
 	if err != nil {
-		return ch, queue, err
+		return nil, amqp.Queue{}, fmt.Errorf("could not bind queue: %v", err)
 	}
 	return ch, queue, nil
 }

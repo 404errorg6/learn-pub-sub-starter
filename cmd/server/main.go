@@ -26,8 +26,8 @@ func main() {
 		log.Fatalf("Error creating channel: %v", err)
 	}
 
-	topicKey := "game_logs.*"
-	_, _, err = pubsub.DeclareAndBind(conn, routing.ExchangePerilTopic, topicKey, routing.GameLogSlug, pubsub.Durable)
+	topicKey := "game_logs*"
+	err = pubsub.SubscribeGob(conn, routing.ExchangePerilTopic, routing.GameLogSlug, topicKey, pubsub.Durable, handlerGamelogs())
 	if err != nil {
 		log.Fatalf("Error while binding server to queue: %v\n", err)
 	}

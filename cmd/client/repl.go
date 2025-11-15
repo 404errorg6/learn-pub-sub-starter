@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
@@ -53,7 +55,33 @@ func startREPL(gameState *gamelogic.GameState, ch *amqp091.Channel) {
 		}
 
 		if cmd == "spam" {
-			fmt.Printf("Spamming not allowed yet!\n")
+			if len(input) < 2 {
+				fmt.Printf("%v command requires a number as argument\n", cmd)
+				continue
+			}
+
+			nStr := input[1]
+			n, err := strconv.Atoi(nStr)
+			if err != nil {
+				fmt.Printf("Error converting %v to int type: %v", nStr, err)
+				continue
+			}
+
+			for range n {
+				randomShit := gamelogic.GetMaliciousLog()
+				randomShitStruct := routing.GameLog{
+					CurrentTime: time.Now(),
+					Username:    gameState.GetUsername(),
+					Message:     randomShit,
+				}
+
+				key := fmt.Sprintf("%v.%v", routing.GameLogSlug, gameState.Player.Username)
+				err = pubsub.PublishGob(ch, routing.ExchangePerilTopic, key, randomShitStruct)
+				if err != nil {
+					fmt.Printf("Error publishing msg: %v\n", err)
+					continue
+				}
+			}
 			continue
 		}
 

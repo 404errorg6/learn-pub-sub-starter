@@ -39,8 +39,13 @@ func handleCmds(ch *amqp091.Channel) {
 			continue
 		}
 
+		if cmd == "help" {
+			gamelogic.PrintServerHelp()
+			continue
+		}
+
 		if cmd == "quit" {
-			log.Printf("Exiting the game\n")
+			gamelogic.PrintQuit()
 			return
 		}
 

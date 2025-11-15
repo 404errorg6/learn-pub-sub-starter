@@ -44,5 +44,11 @@ func main() {
 		log.Fatalf("Error subscribing to %v: %v\n", moveQName, err)
 	}
 
+	warQName := fmt.Sprintf("%v.*", routing.WarRecognitionsPrefix)
+	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilTopic, routing.WarRecognitionsPrefix, warQName, pubsub.Durable, handlerWar(gameState, ch))
+	if err != nil {
+		log.Fatalf("Error subscribing to %v: %v\n", warQName, err)
+	}
+
 	startREPL(gameState, ch)
 }
